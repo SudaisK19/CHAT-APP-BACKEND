@@ -1,17 +1,41 @@
 // middleware/authMiddleware.js
-const jwt = require('jsonwebtoken');
+const jwt           = require("jsonwebtoken");
+const asyncHandler  = require("express-async-handler");
+const User          = require("../models/userModel");
 
-const protect = (req, res, next) => {
-  let token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).send('Not authorized, no token');
+exports.protect = asyncHandler(async (req, res, next) => {
+  console.log("→ Authorization header:", req.headers.authorization);
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;  // { _id, name, email, role, ... }
-    next();
-  } catch (err) {
-    res.status(401).send('Not authorized, token failed');
+  // 1) grab the token
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer ")
+  ) {
+    token = req.headers.authorization.split(" ")[1];
+  } else if (req.cookies && req.cookies.authToken) {
+    token = req.cookies.authToken;
   }
-};
 
-module.exports = { protect };
+  if (!token) {
+    res.status(401);
+    throw new Error("Not authorized, token missing");
+  }
+
+  console.log("→ Raw token string:", token);
+
+  // 2) verify inside a single try/catch
+  try {
+    console.log("→ About to verify token…");
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("↳ decoded JWT payload:", decoded);
+
+    // 3) attach user and continue
+    req.user = await User.findById(decoded.id).select("-password");
+    return next();
+  } catch (err) {
+    console.error("🚫 JWT verification failed:", err.message);
+    res.status(401);
+    throw new Error("Not authorized, token invalid");
+  }
+});
